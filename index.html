@@ -206,37 +206,122 @@ async function openFile() {
   } catch (e) {}
 }
 
-async function saveFile() {
-  try {
-    if (!fileHandle) {
-      fileHandle = await window.showSaveFilePicker({
-        suggestedName: filename || 'untitled.txt',
-        types: [{ description: 'All Files', accept: { 'text/plain': ['.*'] } }]
-      });
-      filename = fileHandle.name;
-    }
-    const writable = await fileHandle.createWritable();
-    await writable.write(textarea.value);
-    await writable.close();
-    modified = false;
-    updateStatus();
-  } catch (e) {}
+function showNameDialog(callback) {
+  // remove any existing dialog
+  const old = document.querySelector('.name-dialog-overlay');
+  if (old) old.remove();
 
-  // fallback for browsers without File System Access API
-  if (!window.showOpenFilePicker) {
-    const blob = new Blob([textarea.value], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename || 'untitled.txt';
-    a.click();
-    URL.revokeObjectURL(url);
-    modified = false;
-    updateStatus();
-  }
+  const overlay = document.createElement('div');
+  overlay.className = 'name-dialog-overlay';
+  overlay.style.cssText = `
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(242,247,243,0.85); display: flex;
+    align-items: center; justify-content: center; z-index: 20;
+    border-radius: var(--radius);
+  `;
+
+  const box = document.createElement('div');
+  box.style.cssText = `
+    background: #fff; border-radius: 10px; padding: 24px 28px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.10); width: 340px;
+  `;
+  box.innerHTML = `
+    <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:16px;">
+      name this file
+    </div>
+    <input type="text" id="name-input" value="${filename || ''}"
+      style="width:100%;border:1px solid var(--border);border-radius:6px;
+             padding:10px 12px;font-size:15px;font-family:inherit;outline:none;
+             color:var(--text);background:#f9faf9;"
+      placeholder="untitled.txt" autofocus>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+      <button id="name-cancel"
+        style="background:none;border:none;padding:8px 18px;border-radius:6px;
+               font-size:14px;cursor:pointer;color:var(--text-secondary);">cancel</button>
+      <button id="name-confirm"
+        style="background:var(--primary);color:#fff;border:none;padding:8px 18px;
+               border-radius:6px;font-size:14px;cursor:pointer;font-weight:500;">save</button>
+    </div>
+  `;
+  overlay.appendChild(box);
+  document.getElementById('editor-area').appendChild(overlay);
+
+  const input = document.getElementById('name-input');
+  input.focus();
+  input.select();
+
+  const confirm = () => {
+    const name = input.value.trim() || 'untitled.txt';
+    overlay.remove();
+    callback(name);
+  };
+
+  document.getElementById('name-confirm').onclick = confirm;
+  document.getElementById('name-cancel').onclick = () => { overlay.remove(); };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirm();
+    if (e.key === 'Escape') overlay.remove();
+  });
 }
 
-// load from URL param or drag-and-drop
+function writeFile(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveFile() {
+  // if we have a File System Access handle, use it
+  if (fileHandle) {
+    try {
+      const writable = await fileHandle.createWritable();
+      await writable.write(textarea.value);
+      await writable.close();
+      modified = false;
+      updateStatus();
+      return;
+    } catch (e) {}
+  }
+
+  // if no filename yet, prompt for one
+  if (!filename) {
+    showNameDialog(async (name) => {
+      filename = name;
+      const blob = new Blob([textarea.value], { type: 'text/plain' });
+      // try File System Access Save As
+      if (window.showSaveFilePicker) {
+        try {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: 'All Files', accept: { 'text/plain': ['.*'] } }]
+          });
+          const writable = await fileHandle.createWritable();
+          await writable.write(textarea.value);
+          await writable.close();
+          filename = fileHandle.name;
+          modified = false;
+          updateStatus();
+          return;
+        } catch (e) {}
+      }
+      writeFile(blob, filename);
+      modified = false;
+      updateStatus();
+    });
+    return;
+  }
+
+  // fallback download
+  const blob = new Blob([textarea.value], { type: 'text/plain' });
+  writeFile(blob, filename);
+  modified = false;
+  updateStatus();
+}
+
+// load from URL param
 const params = new URLSearchParams(window.location.search);
 const fileParam = params.get('file');
 if (fileParam) {
@@ -246,6 +331,7 @@ if (fileParam) {
     .catch(() => {});
 }
 
+// drag and drop
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
