@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>terse</title>
+<style>
+  :root {
+    --bg: #f2f7f3;
+    --surface: #ffffff;
+    --text: #1f2933;
+    --text-secondary: #6b7d73;
+    --primary: #5b8c74;
+    --border: #dce8e0;
+    --radius: 10px;
+    --mint: #bfdacb;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #toolbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+    gap: 4px;
+    z-index: 10;
+  }
+  #toolbar .app-name {
+    font-weight: 700;
+    font-size: 17px;
+    color: var(--text);
+    margin-right: 24px;
+    letter-spacing: -0.3px;
+  }
+  #toolbar button {
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    padding: 7px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #toolbar button:hover { background: #e9f0eb; }
+  #toolbar button:active { background: #dce8e0; }
+  #toolbar .spacer { flex: 1; }
+  #toolbar .close-btn {
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--text-secondary);
+  }
+  #toolbar .close-btn:hover { background: #fee2e2; color: #ef4444; }
+  #toolbar .file-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-right: 16px;
+  }
+
+  #editor-area {
+    position: fixed;
+    top: 76px;
+    left: 32px;
+    right: 32px;
+    bottom: 24px;
+    max-width: 780px;
+    margin: 0 auto;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.04),
+                0 2px 8px rgba(0,0,0,0.03),
+                0 8px 32px rgba(0,0,0,0.06);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  textarea {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Menlo', monospace;
+    font-size: 17px;
+    line-height: 1.75;
+    color: var(--text);
+    padding: 36px 40px;
+    background: transparent;
+    tab-size: 4;
+  }
+  textarea::placeholder { color: #b5c4b9; font-style: italic; }
+  textarea::selection { background: #bfdacb; }
+
+  #status-bar {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    padding: 0 40px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+    gap: 24px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="app-name">terse</span>
+  <button onclick="newFile()">new</button>
+  <button onclick="openFile()">open</button>
+  <button onclick="saveFile()">save</button>
+  <span class="file-status" id="status-label">untitled</span>
+  <span class="spacer"></span>
+  <button class="close-btn" onclick="window.close()">&times;</button>
+</div>
+
+<div id="editor-area">
+  <textarea id="editor" placeholder="start writing…" autofocus spellcheck="false"></textarea>
+  <div id="status-bar">
+    <span id="status-cursor">ln 1, col 1</span>
+    <span id="status-words">0 words</span>
+    <span id="status-chars">0 characters</span>
+    <span id="status-file"></span>
+  </div>
+</div>
+
+<script>
+let modified = false;
+let filename = null;
+let fileHandle = null;
+
+const textarea = document.getElementById('editor');
+const statusLabel = document.getElementById('status-label');
+const statusCursor = document.getElementById('status-cursor');
+const statusWords = document.getElementById('status-words');
+const statusChars = document.getElementById('status-chars');
+const statusFile = document.getElementById('status-file');
+
+function updateStatus() {
+  const val = textarea.value;
+  const pos = textarea.selectionStart;
+  const lines = val.substring(0, pos).split('\n');
+  statusCursor.textContent = `ln ${lines.length}, col ${(lines[lines.length-1]||'').length+1}`;
+  const words = val.trim() ? val.trim().split(/\s+/).length : 0;
+  statusWords.textContent = `${words} words`;
+  statusChars.textContent = `${val.length} characters`;
+  statusLabel.textContent = (modified ? '• ' : '') + (filename || 'untitled');
+  statusFile.textContent = filename || '';
+}
+
+textarea.addEventListener('input', () => { modified = true; updateStatus(); });
+textarea.addEventListener('keyup', updateStatus);
+textarea.addEventListener('click', updateStatus);
+
+textarea.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveFile(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'o') { e.preventDefault(); openFile(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') { e.preventDefault(); newFile(); }
+});
+
+function newFile() {
+  textarea.value = '';
+  modified = false;
+  filename = null;
+  fileHandle = null;
+  updateStatus();
+  textarea.focus();
+}
+
+async function openFile() {
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      types: [{ description: 'All Files', accept: { 'text/plain': ['.*'] } }]
+    });
+    const file = await handle.getFile();
+    textarea.value = await file.text();
+    fileHandle = handle;
+    filename = handle.name;
+    modified = false;
+    updateStatus();
+  } catch (e) {}
+}
+
+async function saveFile() {
+  try {
+    if (!fileHandle) {
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: filename || 'untitled.txt',
+        types: [{ description: 'All Files', accept: { 'text/plain': ['.*'] } }]
+      });
+      filename = fileHandle.name;
+    }
+    const writable = await fileHandle.createWritable();
+    await writable.write(textarea.value);
+    await writable.close();
+    modified = false;
+    updateStatus();
+  } catch (e) {}
+
+  // fallback for browsers without File System Access API
+  if (!window.showOpenFilePicker) {
+    const blob = new Blob([textarea.value], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'untitled.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+    modified = false;
+    updateStatus();
+  }
+}
+
+// load from URL param or drag-and-drop
+const params = new URLSearchParams(window.location.search);
+const fileParam = params.get('file');
+if (fileParam) {
+  fetch(fileParam)
+    .then(r => r.text())
+    .then(t => { textarea.value = t; filename = fileParam.split('/').pop(); updateStatus(); })
+    .catch(() => {});
+}
+
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    textarea.value = await file.text();
+    filename = file.name;
+    modified = false;
+    updateStatus();
+  }
+});
+
+updateStatus();
+textarea.focus();
+</script>
+</body>
+</html>
